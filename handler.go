@@ -18,8 +18,8 @@ package replaceresponse
 
 import (
 	"bytes"
-	"fmt"
 	"compress/gzip"
+	"fmt"
 	"io"
 	"net/http"
 	"regexp"
@@ -175,17 +175,39 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		return nil // Skipped, no need to replace
 	}
 
-	if !isGzipped(rec.Header()) {
-		reader, err := gzip.NewReader(rec.Buffer())
+	var requestBytes []byte
+	if isGzipped(rec.Header()) {
+		reader, err := gzip.NewReader(bytes.NewReader(rec.Buffer().Bytes()))
 		if err != nil {
 			return err
 		}
 		defer reader.Close()
-		requestBytes := reader.Bytes()
+
+		requestBytes, err = io.ReadAll(reader)
+		if err != nil {
+			return err
+		}
 	} else {
-		requestBytes := rec.Buffer().Bytes()
+		requestBytes = rec.Buffer().Bytes()
 	}
+
 	result, _, err := transform.Bytes(tr, requestBytes)
+	if err != nil {
+		return err
+	}
+
+	// Re-compress if needed
+	if isGzipped(rec.Header()) {
+		var compressed bytes.Buffer
+		gw := gzip.NewWriter(&compressed)
+		if _, err := gw.Write(result); err != nil {
+			return err
+		}
+		if err := gw.Close(); err != nil {
+			return err
+		}
+		result = compressed.Bytes()
+	}
 
 	// TODO: could potentially use transform.Append here with a pooled byte slice as buffer?
 	if err != nil {
