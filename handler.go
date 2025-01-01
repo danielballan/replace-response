@@ -19,6 +19,7 @@ package replaceresponse
 import (
 	"bytes"
 	"fmt"
+	"gzip"
 	"io"
 	"net/http"
 	"regexp"
@@ -125,7 +126,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 
 	repl := r.Context().Value(caddy.ReplacerCtxKey).(*caddy.Replacer)
 	h.repl = repl
-	
+
 	tr := h.transformerPool.Get().(transform.Transformer)
 	tr.Reset()
 	defer h.transformerPool.Put(tr)
@@ -173,8 +174,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		return nil // Skipped, no need to replace
 	}
 
+	if !isGzipped(rec.Header()) {
+		reader, err := gzip.NewReader(rec.Buffer())
+		if err != nil {
+			return err
+		}
+		defer reader.Close()
+		requestBytes := reader.Bytes()
+	} else {
+		requestBytes := rec.Buffer().Bytes()
+	}
+	result, _, err := transform.Bytes(tr, requestBytes)
+
 	// TODO: could potentially use transform.Append here with a pooled byte slice as buffer?
-	result, _, err := transform.Bytes(tr, rec.Buffer().Bytes())
 	if err != nil {
 		return err
 	}
@@ -258,6 +270,10 @@ var bufPool = sync.Pool{
 	New: func() interface{} {
 		return new(bytes.Buffer)
 	},
+}
+
+func isGzipped(header http.Header) bool {
+	return strings.Contains(strings.ToLower(header.Get("Content-Encoding")), "gzip")
 }
 
 // Interface guards
