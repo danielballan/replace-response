@@ -19,7 +19,7 @@ package replaceresponse
 import (
 	"bytes"
 	"fmt"
-	"gzip"
+	"compress/gzip"
 	"io"
 	"net/http"
 	"regexp"
